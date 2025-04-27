@@ -315,7 +315,9 @@ size_t get_filesize_from_peer(const std::string& ip,
 void run_leecher_parallel(const std::vector<std::string>& all_peers,
     const std::string& request_fn,
     const std::string& save_fn,
-    unsigned short my_port)
+    unsigned short my_port,
+    const std::string& tracker_ip,
+    unsigned short tracker_port)
 {
     // DEBUG: show where we're writing
     {
@@ -577,7 +579,28 @@ void run_leecher_parallel(const std::vector<std::string>& all_peers,
                 std::cout << "[Leecher] File integrity check passed: " << actual_size << " bytes\n";
 
                 // Run deeper verification
-                verify_file_integrity(file_path, filesize);
+                if (verify_file_integrity(file_path, filesize)) {
+                    // Get local IP for registration
+                    std::string local_ip = get_local_ip();
+
+                    // Auto-register the file with the tracker after successful download
+                    std::thread([request_fn, tracker_ip, tracker_port, local_ip, my_port]() {
+                        // Register the downloaded file with the tracker so it can be shared
+                        bool registered = register_with_retry(
+                            tracker_ip, tracker_port,
+                            request_fn,  // Use original filename for registration
+                            local_ip, my_port);
+
+                        std::lock_guard log_lk(cout_mutex);
+                        if (registered) {
+                            std::cout << "[AutoSeeder] Successfully registered downloaded file: "
+                                << request_fn << " for seeding\n";
+                        }
+                        else {
+                            std::cerr << "[AutoSeeder] Failed to register file: " << request_fn << "\n";
+                        }
+                        }).detach();
+                }
             }
         }
     }
@@ -745,8 +768,8 @@ int main() {
             }
             else {
                 // Start download in separate thread to avoid blocking
-                std::thread download_thread([peers, filename, saveas, p2p_port]() {
-                    run_leecher_parallel(peers, filename, saveas, p2p_port);
+                std::thread download_thread([peers, filename, saveas, p2p_port, tracker_ip, tracker_port]() {
+                    run_leecher_parallel(peers, filename, saveas, p2p_port, tracker_ip, tracker_port);
                     });
                 download_thread.detach();
                 message = "Download started for " + filename;
@@ -862,8 +885,8 @@ int main() {
                 continue;
             }
 
-            std::thread download_thread([peers, filename, saveas, p2p_port]() {
-                run_leecher_parallel(peers, filename, saveas, p2p_port);
+            std::thread download_thread([peers, filename, saveas, p2p_port, tracker_ip, tracker_port]() {
+                run_leecher_parallel(peers, filename, saveas, p2p_port, tracker_ip, tracker_port);
                 });
             download_thread.detach();
             std::cout << "Download started for " << filename << "\n";
