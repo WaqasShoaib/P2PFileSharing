@@ -695,13 +695,31 @@ int main() {
 
     // Handle share form submission
     http.Post("/share", [&](auto& req, auto& res) {
-        // 1) grab the raw string the user typed
         std::string filename = req.get_param_value("filename");
-
-        // ─── NEW: wrap in filesystem::path and force it to absolute ─────────────
         std::filesystem::path file_path{ filename };
+        bool file_found = false;
+        std::vector<std::string> checked_paths;
+
+        // 1. Check absolute path
         if (!file_path.is_absolute()) {
-            file_path = std::filesystem::absolute(file_path);
+            auto abs_path = std::filesystem::absolute(file_path);
+            checked_paths.push_back(abs_path.string());
+            file_found = std::filesystem::exists(abs_path);
+            if (file_found) file_path = abs_path;
+        }
+
+        // 2. Check relative path (original input)
+        if (!file_found) {
+            checked_paths.push_back(file_path.string());
+            file_found = std::filesystem::exists(file_path);
+        }
+
+        // 3. Check shared_files directory
+        if (!file_found) {
+            auto shared_path = std::filesystem::path("shared_files") / filename;
+            checked_paths.push_back(shared_path.string());
+            file_found = std::filesystem::exists(shared_path);
+            if (file_found) file_path = shared_path;
         }
 
         bool success = false;
@@ -710,45 +728,44 @@ int main() {
         if (filename.empty()) {
             message = "Error: No filename provided";
         }
-        // ─── UPDATED: test existence on the absolute path ───────────────────────
-        else if (!std::filesystem::exists(file_path)) {
-            message = "Error: File not found: " + file_path.string();
+        else if (!file_found) {
+            std::string paths;
+            for (const auto& p : checked_paths) paths += "\n- " + p;
+            message = "Error: File not found in:" + paths;
         }
         else {
-            // use only the filename portion when registering/copying
+            // Extract basename and prepare destination
             std::string basename = file_path.filename().string();
             std::filesystem::path dest = std::filesystem::path("shared_files") / basename;
 
             try {
-                // copy from the absolute source path into shared_files
-                std::filesystem::copy_file(
-                    file_path,
-                    dest,
-                    std::filesystem::copy_options::overwrite_existing
-                );
-                // now register with tracker
+                // Skip copy if file is already in shared_files
+                if (file_path != dest) {
+                    std::filesystem::copy_file(
+                        file_path,
+                        dest,
+                        std::filesystem::copy_options::overwrite_existing
+                    );
+                }
+
+                // Register with tracker
                 success = register_with_retry(
                     tracker_ip, tracker_port,
                     basename, local_ip, p2p_port
                 );
-                message = success
-                    ? "File registered successfully"
-                    : "Failed to register file";
+                message = success ? "File registered successfully" : "Failed to register file";
             }
             catch (const std::exception& e) {
-                message = std::string("Error copying file: ") + e.what();
+                message = std::string("Error: ") + e.what();
             }
         }
 
-        // same redirect logic as before
+        // Redirect response
         std::stringstream html;
-        html << "<html><head><meta http-equiv='refresh' content='2;url=/'></head><body>";
-        html << "<h2>" << message << "</h2>";
-        html << "<p>Redirecting back...</p>";
-        html << "</body></html>";
+        html << "<html><head><meta http-equiv='refresh' content='2;url=/'></head><body>"
+            << "<h2>" << message << "</h2><p>Redirecting back...</p></body></html>";
         res.set_content(html.str(), "text/html");
         });
-
     // Handle download form submission
 
     http.Post("/download", [&](auto& req, auto& res) {
