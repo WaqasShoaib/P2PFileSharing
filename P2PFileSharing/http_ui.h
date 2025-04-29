@@ -10,7 +10,6 @@
 #include "leecher.h"
 
 
-struct PeerInfo;
 
 void setup_http_server(
     httplib::Server& http,
