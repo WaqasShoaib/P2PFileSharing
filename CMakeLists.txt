@@ -22,6 +22,6 @@ add_executable(run
 # Add executables separately
 #add_executable(server P2PFileSharing/server.cpp)
 #add_executable(client P2PFileSharing/client.cpp)
-#add_executable(peer   P2PFileSharing/peer.cpp)   # NEW: just this line for peer
+add_executable(peer   P2PFileSharing/peer.cpp)   # NEW: just this line for peer
 add_executable(tracker P2PFileSharing/tracker.cpp)
 
